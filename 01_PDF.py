@@ -104,7 +104,10 @@ def get_session_history(session_ids):
 def embed_files(files):
     all_raw_docs = []
     for file in files:
+
         file_path = f"./.cache/files/{file.name}"
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
         with open(file_path, "wb") as f:
             f.write(file.getvalue())
         loader = PDFPlumberLoader(file_path)
@@ -112,6 +115,7 @@ def embed_files(files):
         for doc in docs:
             doc.metadata["source"] = file.name
         all_raw_docs.extend(docs)
+
 
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
