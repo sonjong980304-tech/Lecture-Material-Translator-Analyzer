@@ -104,8 +104,8 @@ def get_session_history(session_ids):
 def embed_files(files):
     all_raw_docs = []
     for file in files:
-
         file_path = f"./.cache/files/{file.name}"
+        cache_dir = "./.cache/files"
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
         with open(file_path, "wb") as f:
