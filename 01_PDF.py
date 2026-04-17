@@ -39,7 +39,7 @@ with st.sidebar:
         "파일업로드", type=["PDF"], accept_multiple_files=True
     )
     selected_model = st.selectbox(
-        "llm선택", ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"], index=0
+        "llm선택", ["gpt-4o-mini", "gpt-4o", "gpt-5.4","gpt-5.4-mini"], index=3
     )
     session_id = st.text_input("세션 ID", "abc123")
     st.caption("made by sonjong")
