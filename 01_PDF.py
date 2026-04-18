@@ -101,7 +101,7 @@ def get_session_history(session_ids):
     return st.session_state["store"][session_ids]
 
 
-@st.cache_resource(show_spinner="PDF 페이지를 정밀 분석 중입니다...")
+@st.cache_resource(show_spinner="PDF 페이지를 분석 중입니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
@@ -113,22 +113,20 @@ def embed_files(files):
         with open(file_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # PyPDFLoader로 변경 (페이지 분할에 더 강합니다)
+        # 1. 페이지별로 정확히 로드 (쪼개지 마세요!)
         loader = PyPDFLoader(file_path)
-        docs = loader.load_and_split() # 페이지별로 쪼개서 로드
+        docs = loader.load() # load_and_split()이 아니라 load()를 씁니다.
         
         for i, doc in enumerate(docs):
             doc.metadata["source"] = file.name
             doc.metadata["page"] = i + 1
             all_raw_docs.append(doc)
 
-    # [디버그용] 페이지가 잘 나뉘었는지 확인하기 위해 첫 페이지 글자수를 출력해봅니다.
-    print(f"검증: 총 {len(all_raw_docs)}개 페이지 로드 완료")
-    
+    # 2. 벡터 DB 생성 (채팅용)
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 100}), all_raw_docs
-
+    
+    return vectorstore.as_retriever(search_kwargs={"k": 10}), all_raw_docs
 
 def format_docs(docs):
     return "\n\n".join(
@@ -198,11 +196,10 @@ if uploaded_files:
     with st.sidebar:
         start_btn = st.button("📄 전체 페이지 번역 실행")
 
-    # 1. 번역 버튼이 눌렸을 때 실행되는 로직
     if start_btn:
         if "all_docs" in st.session_state:
             all_docs = st.session_state["all_docs"]
-            total_pages = len(all_docs)
+            total_pages = len(all_docs) # 이제 정확히 37이 나올 겁니다.
             
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -210,8 +207,7 @@ if uploaded_files:
             for i, doc in enumerate(all_docs):
                 page_num = i + 1
                 
-                # [진단 코드] 매 페이지마다 글자 수를 출력해봅니다. 
-                # 만약 모든 페이지의 글자 수가 똑같다면 로딩이 잘못된 것입니다.
+                # 현재 처리 중인 실제 페이지 내용 길이 확인
                 content_len = len(doc.page_content)
                 status_text.text(f"현재 {page_num}/{total_pages} 페이지 번역 중... (내용 길이: {content_len})")
                 
@@ -219,10 +215,10 @@ if uploaded_files:
                 
                 with st.chat_message("assistant"):
                     try:
-                        # 26페이지 지옥을 피하기 위해 모델명을 gpt-4o-mini로 고정하세요.
+                        # trans_chain은 리트리버 없이 순수하게 'context'와 'question'만 받습니다.
                         response = st.session_state["trans_chain"].stream({
-                            "context": doc.page_content, # 여기에 정말 한 페이지만 들어있는지가 핵심!
-                            "question": "이 페이지의 내용을 절대로 요약하지 말고 전체 번역해줘."
+                            "context": doc.page_content,
+                            "question": "이 페이지의 내용을 절대로 요약하지 말고 한국어로 전체 번역해줘."
                         })
                         full_response = st.write_stream(response)
                         
@@ -230,15 +226,14 @@ if uploaded_files:
                             ChatMessage(role="assistant", content=f"### Page {page_num}\n{full_response}")
                         )
                     except Exception as e:
-                        st.error(f"오류: {e}")
+                        st.error(f"오류 발생: {e}")
                         break
                 
-                time.sleep(1)
+                time.sleep(1) # API 과부하 방지
                 progress_bar.progress(page_num / total_pages)
                 st.divider()
             
             st.rerun()
-
 
 # 채팅 입력창
 user_input = st.chat_input("추가로 궁금한 점을 물어보세요!")
