@@ -100,37 +100,41 @@ def get_session_history(session_ids):
         st.session_state["store"][session_ids] = ChatMessageHistory()
     return st.session_state["store"][session_ids]
 
-@st.cache_resource(show_spinner="PDF를 페이지별로 정밀하게 분리 중입니다...")
+@st.cache_resource(show_spinner="PPT 슬라이드를 정밀 분석 중입니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
         cache_dir = "./.cache/files"
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
+        if not os.path.exists(cache_dir): os.makedirs(cache_dir)
         
         file_path = os.path.join(cache_dir, file.name)
         with open(file_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # 1. PyPDFLoader의 가장 안정적인 로딩 방식
-        loader = PyPDFLoader(file_path)
-        # load()가 페이지 분할에 실패할 경우를 대비해 데이터를 검증합니다.
-        temp_docs = loader.load()
+        # 1. PyMuPDFLoader로 변경 (슬라이드 분할에 가장 정확함)
+        loader = PyMuPDFLoader(file_path)
+        docs = loader.load()
         
-        # 만약 전체가 1개로 로드되었다면 강제로 쪼개는 로직 추가
-        if len(temp_docs) == 1 and len(temp_docs[0].page_content) > 10000:
-            from langchain_text_splitters import RecursiveCharacterTextSplitter
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
-            temp_docs = text_splitter.split_documents(temp_docs)
-
-        for i, doc in enumerate(temp_docs):
+        # 2. PPT 특유의 텍스트 중복 및 뭉침 방지
+        last_page_text = ""
+        for i, doc in enumerate(docs):
+            current_text = doc.page_content.strip()
+            
+            # 이전 페이지와 내용이 90% 이상 똑같으면 건너뛰거나 정제 (PPT 오류 방지)
+            if current_text == last_page_text:
+                continue
+                
             doc.metadata["source"] = file.name
             doc.metadata["page"] = i + 1
             all_raw_docs.append(doc)
+            last_page_text = current_text
 
-    # 2. 벡터 DB 생성
+    # 3. 벡터 DB 생성 (채팅용)
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
+    
+    # 디버그용: 실제 페이지가 몇 장으로 나뉘었는지 확인
+    st.sidebar.info(f"검증 완료: 총 {len(all_raw_docs)} 슬라이드 로드")
     
     return vectorstore.as_retriever(search_kwargs={"k": 5}), all_raw_docs
     
@@ -203,44 +207,42 @@ if uploaded_files:
         start_btn = st.button("📄 전체 페이지 번역 실행")
 
     if start_btn:
-        if "all_docs" in st.session_state:
-            all_docs = st.session_state["all_docs"]
-            total_pages = len(all_docs)
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+        all_docs = st.session_state["all_docs"]
+        total_pages = len(all_docs)
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-            for i, doc in enumerate(all_docs):
-                page_num = i + 1
-                
-                # 🚩 여기서 글자수가 3000 이상이면 데이터 로딩이 잘못된 것입니다.
-                content_len = len(doc.page_content)
-                status_text.text(f"현재 {page_num}/{total_pages} 페이지 작업 중... (글자수: {content_len})")
-                
-                st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
-                
-                with st.chat_message("assistant"):
-                    try:
-                        # ⚠️ 핵심: "단 한 페이지"임을 강조하는 프롬프트 주입
-                        response = st.session_state["trans_chain"].stream({
-                            "context": doc.page_content,
-                            "question": "제공된 [Context]는 PDF의 딱 한 페이지입니다. 이 내용만 한국어로 완벽하게 번역하고 해설을 덧붙여주세요."
-                        })
-                        full_response = st.write_stream(response)
-                        
-                        st.session_state["messages"].append(
-                            ChatMessage(role="assistant", content=f"### Page {page_num}\n{full_response}")
-                        )
-                    except Exception as e:
-                        st.error(f"에러: {e}")
-                        break
-                
-                time.sleep(1)
-                progress_bar.progress(page_num / total_pages)
-                st.divider()
+        for i, doc in enumerate(all_docs):
+            page_num = i + 1
             
-            st.success("✅ 모든 페이지 번역 완료!")
-            st.rerun()
+            # [디버그] 현재 페이지의 첫 30자만 보여줘서 다른 페이지임을 확인시킵니다.
+            preview = doc.page_content[:30].replace('\n', ' ')
+            status_text.text(f"진행 중: {page_num}/{total_pages} (내용: {preview}...)")
+            
+            st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
+            
+            with st.chat_message("assistant"):
+                try:
+                    # 번역 시에는 '이전 대화(History)'를 주지 않는 것이 깔끔합니다. (중복 방지)
+                    response = st.session_state["trans_chain"].stream({
+                        "context": doc.page_content,
+                        "question": f"당신은 현재 {page_num}페이지를 작업 중입니다. 이전 내용은 잊고, 오직 이 [Context]만 한국어로 전체 번역하세요."
+                    })
+                    full_response = st.write_stream(response)
+                    
+                    st.session_state["messages"].append(
+                        ChatMessage(role="assistant", content=f"### Page {page_num}\n{full_response}")
+                    )
+                except Exception as e:
+                    st.error(f"오류: {e}")
+                    break
+            
+            time.sleep(1)
+            progress_bar.progress(page_num / total_pages)
+            st.divider()
+        
+        st.rerun()
             
 # 채팅 입력창
 user_input = st.chat_input("추가로 궁금한 점을 물어보세요!")
