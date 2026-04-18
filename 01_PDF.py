@@ -119,7 +119,7 @@ def embed_files(files):
 
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 100}), all_raw_docs
+    return vectorstore.as_retriever(search_kwargs={"k": 500}), all_raw_docs
 
 
 def format_docs(docs):
