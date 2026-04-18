@@ -131,7 +131,7 @@ def format_docs(docs):
     )
 
 
-def create_chains(retriever, model_name="gpt-4o-mini"):
+def create_chains(retriever, model_name="gpt-5.4"):
     # 1. 번역용 프롬프트 (기존 유지)
     translation_prompt = load_prompt("prompts/Translation.yaml", encoding="utf-8")
 
@@ -195,7 +195,10 @@ def create_chains(retriever, model_name="gpt-4o-mini"):
 
 
 # --- 실행 영역 ---
-
+# 메시지 출력
+for msg in st.session_state["messages"]:
+    st.chat_message(msg.role).write(msg.content)
+    
 if uploaded_files:
     retriever, all_docs = embed_files(uploaded_files)
     chat_chain, trans_chain = create_chains(retriever, model_name=selected_model)
@@ -209,8 +212,7 @@ if uploaded_files:
 
     # 1. 번역 버튼이 눌렸을 때 실행되는 로직
     if start_btn:
-        # 이전에 있던 메시지들을 유지하고 싶다면 그대로 두고,
-        # 번역 시 대화창을 깨끗이 하고 싶다면 아래 주석을 해제하세요.
+        # 번역 시 대화창을 깨끗이 하고 싶다면 아래 주석을 해제
         # st.session_state["messages"] = []
 
         for i, doc in enumerate(st.session_state["all_docs"]):
@@ -228,18 +230,15 @@ if uploaded_files:
                 # st.write_stream은 스트리밍이 끝난 후 전체 텍스트를 반환합니다.
                 full_response = st.write_stream(response)
 
-            # --- 핵심: 번역된 내용을 대화 기록에 저장 ---
-            # 페이지 번호와 내용을 합쳐서 저장해야 나중에 다시 그려줄 때 예쁘게 나옵니다.
+            # 번역된 내용을 대화 기록에 저장
             combined_content = f"{page_label}\n\n{full_response}"
             st.session_state["messages"].append(
                 ChatMessage(role="assistant", content=combined_content)
             )
 
-            st.divider()
+            st.return()
 
-# 메시지 출력
-for msg in st.session_state["messages"]:
-    st.chat_message(msg.role).write(msg.content)
+
 
 # 채팅 입력창
 user_input = st.chat_input("추가로 궁금한 점을 물어보세요!")
