@@ -100,7 +100,7 @@ def get_session_history(session_ids):
         st.session_state["store"][session_ids] = ChatMessageHistory()
     return st.session_state["store"][session_ids]
 
-@st.cache_resource(show_spinner="PDF 페이지를 한 장씩 분리하고 있습니다...")
+@st.cache_resource(show_spinner="PDF를 페이지별로 정밀하게 분리 중입니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
@@ -112,26 +112,28 @@ def embed_files(files):
         with open(file_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # 1. 정석적인 페이지 로더 (PyPDFLoader)
+        # 1. PyPDFLoader의 가장 안정적인 로딩 방식
         loader = PyPDFLoader(file_path)
-        # load()는 PDF의 실제 페이지 수만큼 리스트를 반환합니다. (37페이지면 37개)
-        docs = loader.load() 
+        # load()가 페이지 분할에 실패할 경우를 대비해 데이터를 검증합니다.
+        temp_docs = loader.load()
         
-        for i, doc in enumerate(docs):
-            # 글자 수 제한(text[:4000])을 완전히 제거합니다. 
-            # 대신 한 페이지의 내용만 정확히 담겼는지 확인합니다.
+        # 만약 전체가 1개로 로드되었다면 강제로 쪼개는 로직 추가
+        if len(temp_docs) == 1 and len(temp_docs[0].page_content) > 10000:
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
+            temp_docs = text_splitter.split_documents(temp_docs)
+
+        for i, doc in enumerate(temp_docs):
             doc.metadata["source"] = file.name
             doc.metadata["page"] = i + 1
             all_raw_docs.append(doc)
 
-    # 2. 벡터 DB 생성 (채팅용)
+    # 2. 벡터 DB 생성
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
     
-    # 3. 디버깅: 실제 로드된 문서의 개수가 페이지 수와 맞는지 터미널에 출력
-    print(f"DEBUG: 총 {len(all_raw_docs)}개의 독립적인 페이지가 로드되었습니다.")
-    
     return vectorstore.as_retriever(search_kwargs={"k": 5}), all_raw_docs
+    
 def format_docs(docs):
     return "\n\n".join(
         [
@@ -210,34 +212,36 @@ if uploaded_files:
 
             for i, doc in enumerate(all_docs):
                 page_num = i + 1
-                # 이제 content_len이 12770이 아니라, 보통 1000~3000 사이여야 정상입니다.
+                
+                # 🚩 여기서 글자수가 3000 이상이면 데이터 로딩이 잘못된 것입니다.
                 content_len = len(doc.page_content)
-                status_text.text(f"진행 중: {page_num}/{total_pages} 페이지 (글자수: {content_len})")
+                status_text.text(f"현재 {page_num}/{total_pages} 페이지 작업 중... (글자수: {content_len})")
                 
                 st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
                 
                 with st.chat_message("assistant"):
                     try:
-                        # [핵심] 리트리버를 거치지 않고, 해당 페이지 객체의 내용만 직접 전달합니다.
+                        # ⚠️ 핵심: "단 한 페이지"임을 강조하는 프롬프트 주입
                         response = st.session_state["trans_chain"].stream({
                             "context": doc.page_content,
-                            "question": "이 페이지의 내용을 절대로 요약하지 말고 전체 번역해줘."
+                            "question": "제공된 [Context]는 PDF의 딱 한 페이지입니다. 이 내용만 한국어로 완벽하게 번역하고 해설을 덧붙여주세요."
                         })
                         full_response = st.write_stream(response)
                         
-                        # 대화 기록에 저장
                         st.session_state["messages"].append(
                             ChatMessage(role="assistant", content=f"### Page {page_num}\n{full_response}")
                         )
                     except Exception as e:
-                        st.error(f"{page_num}페이지 번역 중 오류: {e}")
+                        st.error(f"에러: {e}")
                         break
                 
-                time.sleep(1) # API 안정성을 위한 짧은 휴식
+                time.sleep(1)
                 progress_bar.progress(page_num / total_pages)
                 st.divider()
             
+            st.success("✅ 모든 페이지 번역 완료!")
             st.rerun()
+            
 # 채팅 입력창
 user_input = st.chat_input("추가로 궁금한 점을 물어보세요!")
 
