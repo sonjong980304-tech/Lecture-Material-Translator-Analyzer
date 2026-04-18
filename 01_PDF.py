@@ -40,7 +40,7 @@ with st.sidebar:
         "파일업로드", type=["PDF"], accept_multiple_files=True
     )
     selected_model = st.selectbox(
-        "llm선택", ["gpt-4o-mini", "gpt-4o", "gpt-5.4","gpt-5.4-mini"], index=3
+        "llm선택", ["gpt-4o-mini", "gpt-4o", "gpt-5.4","gpt-5.4-mini"], index=0
     )
     session_id = st.text_input("세션 ID", "abc123")
     st.caption("made by sonjong")
@@ -137,7 +137,7 @@ def format_docs(docs):
     )
 
 
-def create_chains(retriever, model_name="gpt-5.4"):
+def create_chains(retriever, model_name="gpt-4o"):
     # 1. 번역용 프롬프트 (기존 유지)
     translation_prompt = load_prompt("prompts/Translation.yaml", encoding="utf-8")
 
