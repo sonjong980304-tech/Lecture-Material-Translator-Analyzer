@@ -15,6 +15,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_teddynote import logging
 from operator import itemgetter
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 
 # API 키 및 로깅 설정
 load_dotenv()
