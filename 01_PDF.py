@@ -100,7 +100,7 @@ def get_session_history(session_ids):
         st.session_state["store"][session_ids] = ChatMessageHistory()
     return st.session_state["store"][session_ids]
 
-@st.cache_resource(show_spinner="PDF 페이지를 정밀 분석 중입니다...")
+@st.cache_resource(show_spinner="PDF 페이지를 한 장씩 분리하고 있습니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
@@ -112,27 +112,26 @@ def embed_files(files):
         with open(file_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # 1. PDFPlumberLoader로 변경 (페이지 구분에 더 정확함)
-        loader = PDFPlumberLoader(file_path)
-        docs = loader.load()
+        # 1. 정석적인 페이지 로더 (PyPDFLoader)
+        loader = PyPDFLoader(file_path)
+        # load()는 PDF의 실제 페이지 수만큼 리스트를 반환합니다. (37페이지면 37개)
+        docs = loader.load() 
         
         for i, doc in enumerate(docs):
-            # [중요] 만약 한 페이지가 너무 길면(4000자 이상), 로더 오류로 판단하고 자릅니다.
-            # 이 코드가 "22페이지 지옥"을 막아줄 것입니다.
-            text = doc.page_content
-            if len(text) > 4000:
-                text = text[:4000] # 일단 4000자까지만 가져오도록 강제 제한
-            
-            doc.page_content = text
+            # 글자 수 제한(text[:4000])을 완전히 제거합니다. 
+            # 대신 한 페이지의 내용만 정확히 담겼는지 확인합니다.
             doc.metadata["source"] = file.name
             doc.metadata["page"] = i + 1
             all_raw_docs.append(doc)
 
+    # 2. 벡터 DB 생성 (채팅용)
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
     
-    return vectorstore.as_retriever(search_kwargs={"k": 5}), all_raw_docs
+    # 3. 디버깅: 실제 로드된 문서의 개수가 페이지 수와 맞는지 터미널에 출력
+    print(f"DEBUG: 총 {len(all_raw_docs)}개의 독립적인 페이지가 로드되었습니다.")
     
+    return vectorstore.as_retriever(search_kwargs={"k": 5}), all_raw_docs
 def format_docs(docs):
     return "\n\n".join(
         [
@@ -204,42 +203,41 @@ if uploaded_files:
     if start_btn:
         if "all_docs" in st.session_state:
             all_docs = st.session_state["all_docs"]
-            total_pages = len(all_docs) # 이제 정확히 37이 나올 겁니다.
+            total_pages = len(all_docs)
             
             progress_bar = st.progress(0)
             status_text = st.empty()
 
             for i, doc in enumerate(all_docs):
                 page_num = i + 1
-                
-                # 현재 처리 중인 실제 페이지 내용 길이 확인
+                # 이제 content_len이 12770이 아니라, 보통 1000~3000 사이여야 정상입니다.
                 content_len = len(doc.page_content)
-                status_text.text(f"현재 {page_num}/{total_pages} 페이지 번역 중... (내용 길이: {content_len})")
+                status_text.text(f"진행 중: {page_num}/{total_pages} 페이지 (글자수: {content_len})")
                 
                 st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
                 
                 with st.chat_message("assistant"):
                     try:
-                        # trans_chain은 리트리버 없이 순수하게 'context'와 'question'만 받습니다.
+                        # [핵심] 리트리버를 거치지 않고, 해당 페이지 객체의 내용만 직접 전달합니다.
                         response = st.session_state["trans_chain"].stream({
                             "context": doc.page_content,
-                            "question": "이 페이지의 내용을 절대로 요약하지 말고 한국어로 전체 번역해줘."
+                            "question": "이 페이지의 내용을 절대로 요약하지 말고 전체 번역해줘."
                         })
                         full_response = st.write_stream(response)
                         
+                        # 대화 기록에 저장
                         st.session_state["messages"].append(
                             ChatMessage(role="assistant", content=f"### Page {page_num}\n{full_response}")
                         )
                     except Exception as e:
-                        st.error(f"오류 발생: {e}")
+                        st.error(f"{page_num}페이지 번역 중 오류: {e}")
                         break
                 
-                time.sleep(1) # API 과부하 방지
+                time.sleep(1) # API 안정성을 위한 짧은 휴식
                 progress_bar.progress(page_num / total_pages)
                 st.divider()
             
             st.rerun()
-
 # 채팅 입력창
 user_input = st.chat_input("추가로 궁금한 점을 물어보세요!")
 
