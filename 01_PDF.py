@@ -14,6 +14,7 @@ from langchain_core.messages import ChatMessage
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_teddynote import logging
 from operator import itemgetter
+from langchain_community.document_loaders import PyPDFLoader
 
 # API 키 및 로깅 설정
 load_dotenv()
@@ -100,38 +101,33 @@ def get_session_history(session_ids):
     return st.session_state["store"][session_ids]
 
 
-@st.cache_resource(show_spinner="파일을 처리 중입니다...")
+@st.cache_resource(show_spinner="PDF 페이지를 정밀 분석 중입니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
-        # 1. 파일 저장 경로 설정
         cache_dir = "./.cache/files"
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
         
         file_path = os.path.join(cache_dir, file.name)
         with open(file_path, "wb") as f:
-            f.write(file.getbuffer()) 
+            f.write(file.getbuffer())
 
-        # 2. PDF 로드 (페이지 단위로 정확히 끊어오기)
-        loader = PDFPlumberLoader(file_path)
-        docs = loader.load()
+        # PyPDFLoader로 변경 (페이지 분할에 더 강합니다)
+        loader = PyPDFLoader(file_path)
+        docs = loader.load_and_split() # 페이지별로 쪼개서 로드
         
-        # [중요] 각 페이지가 독립적인지 메타데이터 확인
         for i, doc in enumerate(docs):
             doc.metadata["source"] = file.name
-            doc.metadata["page"] = i + 1 # 페이지 번호 강제 부여
-            all_raw_docs.append(doc) # extend 대신 append로 하나씩 확실히 추가
+            doc.metadata["page"] = i + 1
+            all_raw_docs.append(doc)
 
-    # 3. 벡터 DB 생성
+    # [디버그용] 페이지가 잘 나뉘었는지 확인하기 위해 첫 페이지 글자수를 출력해봅니다.
+    print(f"검증: 총 {len(all_raw_docs)}개 페이지 로드 완료")
+    
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
-    
-    # 디버깅을 위해 페이지 수 출력 (터미널에서 확인 가능)
-    print(f"총 로드된 페이지 수: {len(all_raw_docs)}") 
-    
-    return vectorstore.as_retriever(search_kwargs={"k": 50}), all_raw_docs
-
+    return vectorstore.as_retriever(search_kwargs={"k": 100}), all_raw_docs
 
 
 def format_docs(docs):
