@@ -104,22 +104,34 @@ def get_session_history(session_ids):
 def embed_files(files):
     all_raw_docs = []
     for file in files:
-        file_path = f"./.cache/files/{file.name}"
+        # 1. 파일 저장 경로 설정
         cache_dir = "./.cache/files"
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
+        
+        file_path = os.path.join(cache_dir, file.name)
         with open(file_path, "wb") as f:
-            f.write(file.getvalue())
+            f.write(file.getbuffer()) 
+
+        # 2. PDF 로드 (페이지 단위로 정확히 끊어오기)
         loader = PDFPlumberLoader(file_path)
         docs = loader.load()
-        for doc in docs:
+        
+        # [중요] 각 페이지가 독립적인지 메타데이터 확인
+        for i, doc in enumerate(docs):
             doc.metadata["source"] = file.name
-        all_raw_docs.extend(docs)
+            doc.metadata["page"] = i + 1 # 페이지 번호 강제 부여
+            all_raw_docs.append(doc) # extend 대신 append로 하나씩 확실히 추가
 
-
+    # 3. 벡터 DB 생성
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 500}), all_raw_docs
+    
+    # 디버깅을 위해 페이지 수 출력 (터미널에서 확인 가능)
+    print(f"총 로드된 페이지 수: {len(all_raw_docs)}") 
+    
+    return vectorstore.as_retriever(search_kwargs={"k": 50}), all_raw_docs
+
 
 
 def format_docs(docs):
