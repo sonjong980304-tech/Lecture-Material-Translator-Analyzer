@@ -100,8 +100,7 @@ def get_session_history(session_ids):
         st.session_state["store"][session_ids] = ChatMessageHistory()
     return st.session_state["store"][session_ids]
 
-
-@st.cache_resource(show_spinner="PDF 페이지를 분석 중입니다...")
+@st.cache_resource(show_spinner="PDF 페이지를 정밀 분석 중입니다...")
 def embed_files(files):
     all_raw_docs = []
     for file in files:
@@ -113,21 +112,27 @@ def embed_files(files):
         with open(file_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # 1. 페이지별로 정확히 로드 (쪼개지 마세요!)
-        loader = PyPDFLoader(file_path)
-        docs = loader.load() # load_and_split()이 아니라 load()를 씁니다.
+        # 1. PDFPlumberLoader로 변경 (페이지 구분에 더 정확함)
+        loader = PDFPlumberLoader(file_path)
+        docs = loader.load()
         
         for i, doc in enumerate(docs):
+            # [중요] 만약 한 페이지가 너무 길면(4000자 이상), 로더 오류로 판단하고 자릅니다.
+            # 이 코드가 "22페이지 지옥"을 막아줄 것입니다.
+            text = doc.page_content
+            if len(text) > 4000:
+                text = text[:4000] # 일단 4000자까지만 가져오도록 강제 제한
+            
+            doc.page_content = text
             doc.metadata["source"] = file.name
             doc.metadata["page"] = i + 1
             all_raw_docs.append(doc)
 
-    # 2. 벡터 DB 생성 (채팅용)
     embeddings = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=all_raw_docs, embedding=embeddings)
     
-    return vectorstore.as_retriever(search_kwargs={"k": 10}), all_raw_docs
-
+    return vectorstore.as_retriever(search_kwargs={"k": 5}), all_raw_docs
+    
 def format_docs(docs):
     return "\n\n".join(
         [
