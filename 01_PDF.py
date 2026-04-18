@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-
+import time
 # LangChain 관련 임포트
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PDFPlumberLoader
@@ -172,26 +172,6 @@ def create_chains(retriever, model_name="gpt-5.4"):
     translation_chain = translation_prompt | llm | StrOutputParser()
     return with_message_history, translation_chain
 
-    # A. 멀티턴 채팅 체인
-    rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | chat_prompt
-        | llm
-        | StrOutputParser()
-    )
-
-    # 세션 기록을 관리하는 래퍼 추가
-    with_message_history = RunnableWithMessageHistory(
-        rag_chain,
-        get_session_history,
-        input_messages_key="question",
-        history_messages_key="chat_history",
-    )
-
-    # B. 페이지별 번역 체인
-    translation_chain = translation_prompt | llm | StrOutputParser()
-
-    return with_message_history, translation_chain
 
 
 # --- 실행 영역 ---
@@ -212,31 +192,48 @@ if uploaded_files:
 
     # 1. 번역 버튼이 눌렸을 때 실행되는 로직
     if start_btn:
+        if "all_docs" in st.session_state and "trans_chain" in st.session_state:
+            all_docs= st.session_state["all_docs"]
+            total_pages = len(all_docs)
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
         # 번역 시 대화창을 깨끗이 하고 싶다면 아래 주석을 해제
         # st.session_state["messages"] = []
 
-        for i, doc in enumerate(st.session_state["all_docs"]):
-            page_label = f"### 📑 Page {i+1} 번역 및 해설"
+        for i, doc in enumerate("all_docs"):
+            page_num = i + 1
+            status_text.text(f"현재 {page_num} / {total_pages} 페이지 번역 중...")
+            st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
 
-            # 화면에 실시간으로 보여주기
-            st.markdown(page_label)
+           
             with st.chat_message("assistant"):
-                response = st.session_state["trans_chain"].stream(
-                    {
+                try:
+                    response = st.session_state["trans_chain"].stream({
                         "context": doc.page_content,
                         "question": "이 페이지 내용을 누락 없이 전체 번역하고 해설해줘.",
-                    }
-                )
-                # st.write_stream은 스트리밍이 끝난 후 전체 텍스트를 반환합니다.
-                full_response = st.write_stream(response)
+                    })
+                    full_response = st.write_stream(response)
+                    
+                    # 메시지 저장
+                    combined_content = f"### 📑 Page {page_num} 번역 및 해설\n\n{full_response}"
+                    st.session_state["messages"].append(
+                        ChatMessage(role="assistant", content=combined_content)
+                    )
+                except Exception as e:
+                    st.error(f"{page_num}페이지에서 오류가 발생했습니다: {e}")
+                    break # 에러 나면 멈추게 해서 무한루프 방지
+            
+            # 2. 안전 장치: 페이지당 1초씩 쉬어줍니다 (API 과부하 방지)
+            time.sleep(1) 
+            
+            # 진행 바 업데이트
+            progress_bar.progress(page_num / total_pages)
+            st.divider()
 
-            # 번역된 내용을 대화 기록에 저장
-            combined_content = f"{page_label}\n\n{full_response}"
-            st.session_state["messages"].append(
-                ChatMessage(role="assistant", content=combined_content)
-            )
-
-            st.return()
+        status_text.text("✅ 모든 페이지 번역이 완료되었습니다!")
+        time.sleep(2)
+        st.rerun()
 
 
 
