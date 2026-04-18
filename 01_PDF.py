@@ -201,7 +201,7 @@ if uploaded_files:
         # 번역 시 대화창을 깨끗이 하고 싶다면 아래 주석을 해제
         # st.session_state["messages"] = []
 
-        for i, doc in enumerate("all_docs"):
+        for i, doc in enumerate(all_docs):
             page_num = i + 1
             status_text.text(f"현재 {page_num} / {total_pages} 페이지 번역 중...")
             st.markdown(f"### 📑 Page {page_num} 번역 및 해설")
