@@ -5,8 +5,9 @@ https://lecture-material-translator-analyzer-pqf6lyjskqleky8qwpuwgo.streamlit.ap
 해당 링크를 통해 직접 시도해볼 수 있습니다.
 
 <img width="960" height="446" alt="image" src="https://github.com/user-attachments/assets/e3bee4a8-27d9-4320-8c86-4981c8f42862" />
+웹사이트 첫 화면입니다. 왼쪽 바 상단에 PDF파일을 업로드 합니다.
 
 <img width="959" height="446" alt="image" src="https://github.com/user-attachments/assets/0cd2a3ea-1639-4f62-92c7-9a9ce1faef90" />
-
+업로드 하면 LLM 모델이 PDF를 
 
 <img width="956" height="448" alt="image" src="https://github.com/user-attachments/assets/b0b56ada-9448-4eab-94f1-599925349319" />
